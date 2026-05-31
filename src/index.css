@@ -1,0 +1,227 @@
+/* --- 1. UMUMIY BAZAVIY SOZLAMALAR --- */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+  background-color: #0b141a; /* To'q va chuqur qora-yashil fon */
+  color: #e9edef;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* --- 2. YANGILANGAN VA JIDDIY AVTORIZATSIYA OYNASI (AUTH PANEL) --- */
+.auth-container {
+  background: #111b21; /* Sidebar rangi bilan bir xil, uyg'unlik uchun */
+  padding: 40px 35px;
+  border-radius: 16px; /* Zamonaviy yumshatilgan burchaklar */
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); /* Chuqur soya effekti */
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+  border: 1px solid #222e35; /* Nozik chegara chizig'i */
+  transition: all 0.3s ease;
+}
+
+.auth-container h2 {
+  font-size: 28px;
+  font-weight: 600;
+  margin-bottom: 25px;
+  color: #e9edef;
+  letter-spacing: 0.5px;
+}
+
+/* --- 3. INPUTLAR (MATN YOZISH JOYI) DIZAYNI --- */
+.auth-container input, .sidebar input, .sidebar form input {
+  width: 100%;
+  padding: 14px 16px;
+  margin: 12px 0;
+  border: 1px solid #222e35;
+  border-radius: 8px; /* Burchaklari chiroyli yumaloq */
+  background: #2a3942; /* O'zingiz yoqtirgan to'q kulrang fon */
+  color: #fff;
+  font-size: 15px;
+  outline: none;
+  transition: all 0.25s ease-in-out;
+}
+
+/* Inputga sichqoncha bosilgandagi neon effekt (Focus) */
+.auth-container input:focus, .sidebar input:focus {
+  border-color: #00a884; /* Bizning asosiy yashil rang */
+  background: #32444f;
+  box-shadow: 0 0 0 3px rgba(0, 168, 132, 0.2); /* Nozik yashil nurlanish */
+}
+
+/* --- 4. TUGMALAR (BUTTONS) DIZAYNI --- */
+.auth-container button, .sidebar button[type="submit"] {
+  width: 100%;
+  padding: 14px;
+  background: #00a884; /* Platforma yashil brend rangi */
+  border: none;
+  color: #111b21; /* Matn to'q rangda o'qilishi oson bo'lishi uchun */
+  font-size: 16px;
+  font-weight: 700; /* Qalin matn */
+  border-radius: 8px;
+  cursor: pointer;
+  margin-top: 15px;
+  transition: all 0.2s ease;
+  letter-spacing: 0.5px;
+}
+
+/* Tugma ustiga sichqoncha borganda (Hover) */
+.auth-container button:hover, .sidebar button[type="submit"]:hover {
+  background: #00cc9f; /* Biroz yorqinroq yashil */
+  transform: translateY(-1px); /* Tepaga biroz ko'tarilish effekti */
+  box-shadow: 0 4px 12px rgba(0, 168, 132, 0.3);
+}
+
+.auth-container button:active, .sidebar button[type="submit"]:active {
+  transform: translateY(1px);
+}
+
+/* --- 5. LINKLAR VA HAVOLALAR --- */
+.auth-container p {
+  margin-top: 20px;
+  font-size: 14px;
+  color: #8696a0;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: color 0.2s;
+}
+
+.auth-container p:hover {
+  color: #00a884; /* Havolalar ustiga borganda yashil rangga kiradi */
+}
+
+/* --- 6. ASOSIY CHAT MAKETI (LAYOUT) --- */
+.chat-layout {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  background: #222e35;
+}
+
+.sidebar {
+  background: #111b21;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Sozlamalardagi dynamic inputlar uchun maxsus */
+.sidebar form input {
+  margin: 6px 0 12px 0 !important;
+}
+
+.chat-area {
+  display: flex;
+  flex-direction: column;
+  background: #0b141a;
+}
+
+.chat-header {
+  background: #202c33;
+  padding: 18px 24px;
+  font-size: 17px;
+  font-weight: 600;
+  color: #e9edef;
+  border-bottom: 1px solid #222e35;
+}
+
+.messages-container {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- 7. XABARLAR BULUTCHASI (BUBBLES) --- */
+.message {
+  max-width: 60%;
+  padding: 11px 15px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+  font-size: 15px;
+  line-height: 1.4;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+.message.sent {
+  background: #005c4b; /* Yuborilgan xabar - to'q yashil */
+  color: #e9edef;
+  align-self: flex-end;
+  border-top-right-radius: 2px; /* Telegram uslubidagi burchak */
+}
+
+.message.received {
+  background: #202c33; /* Kelgan xabar - to'q kulrang */
+  color: #e9edef;
+  align-self: flex-start;
+  border-top-left-radius: 2px;
+}
+
+/* --- 8. PASTKI XABAR YUBORISH MAYDONI --- */
+.input-area {
+  background: #202c33;
+  padding: 15px 20px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid #222e35;
+}
+
+.input-area input {
+  flex: 1;
+  padding: 14px 18px;
+  border: none;
+  border-radius: 8px;
+  background: #2a3942;
+  color: white;
+  outline: none;
+  font-size: 15px;
+}
+
+.input-area button {
+  padding: 14px 24px;
+  background: #00a884;
+  border: none;
+  color: #111b21;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+  transition: background 0.2s;
+}
+
+.input-area button:hover {
+  background: #00cc9f;
+}
+
+/* --- 9. SURILADIGAN CHIZIQ (RESIZER) --- */
+.resizer {
+  width: 4px;
+  cursor: col-resize;
+  background-color: #0b141a;
+  transition: background-color 0.2s;
+  height: 100vh;
+}
+
+.resizer:hover, .resizer:active {
+  background-color: #00a884;
+}
