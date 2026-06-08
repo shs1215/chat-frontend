@@ -3,9 +3,12 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import { useTranslation } from 'react-i18next';
 
-const API_URL = 'https://chat-backend-gukk.onrender.com/api/auth';
-const ROOM_URL = 'https://chat-backend-gukk.onrender.com/api/rooms';
-const SOCKET_URL = 'https://chat-backend-gukk.onrender.com';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://chat-backend-gukk.onrender.com';
+const ROOM_BASE = import.meta.env.VITE_ROOM_URL || API_BASE;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || API_BASE;
+
+const API_URL = `${API_BASE}/api/auth`;
+const ROOM_URL = `${ROOM_BASE}/api/rooms`;
 
 const STORAGE = {
   user: 'chat_user',
@@ -228,7 +231,7 @@ function App() {
 
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = Number(localStorage.getItem(STORAGE.sidebarWidth));
-    return Number.isFinite(saved) && saved >= 220 ? saved : 300;
+    return Number.isFinite(saved) && saved >= 220 ? saved : 320;
   });
 
   const [roomDetails, setRoomDetails] = useState(null);
@@ -243,6 +246,9 @@ function App() {
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
   const [selectedMedia, setSelectedMedia] = useState(null);
   const [mediaInputKey, setMediaInputKey] = useState(0);
+
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
+  const [mobilePane, setMobilePane] = useState('sidebar');
 
   const socketRef = useRef(null);
   const isResizing = useRef(false);
@@ -338,6 +344,7 @@ function App() {
       creator: room.owner,
     });
     setShowRoomInfo(false);
+    if (isMobile) setMobilePane('chat');
     await loadRoomDetails(room.id);
   };
 
@@ -430,7 +437,7 @@ function App() {
       try {
         await joinByInviteCode(code, normalizedUser.id);
       } catch {
-        // ignore auto-join failures
+        // ignore
       }
     }
   };
@@ -441,6 +448,13 @@ function App() {
       i18n.changeLanguage(savedLang);
     }
   }, [i18n]);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', onResize);
+    onResize();
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     const savedUser = safeJsonParse(localStorage.getItem(STORAGE.user), null);
@@ -509,7 +523,7 @@ function App() {
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (!isResizing.current) return;
-      if (e.clientX >= 220 && e.clientX <= 520) {
+      if (!isMobile && e.clientX >= 240 && e.clientX <= 520) {
         setSidebarWidth(e.clientX);
       }
     };
@@ -526,7 +540,7 @@ function App() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, []);
+  }, [isMobile]);
 
   useEffect(() => {
     if (!activeItem || !user) {
@@ -569,7 +583,7 @@ function App() {
     if (!user?.id) return;
     const timer = setInterval(() => {
       fetchRoomsList(user.id);
-    }, 15000);
+    }, 12000);
     return () => clearInterval(timer);
   }, [user?.id]);
 
@@ -666,6 +680,7 @@ function App() {
         creator: createdRoom.owner,
       });
       setRoomDetails(createdRoom);
+      if (isMobile) setMobilePane('chat');
 
       setShowCreateModal(false);
       setNewRoomName('');
@@ -695,6 +710,7 @@ function App() {
         id: foundUser.id,
         label: foundUser.nickname,
       });
+      if (isMobile) setMobilePane('chat');
 
       setSearchNickname('');
     } catch (err) {
@@ -718,6 +734,7 @@ function App() {
         creator: room.owner,
       });
       setShowSettings(false);
+      if (isMobile) setMobilePane('chat');
       setSearchRoomUsername('');
       setShowRoomInfo(false);
       await loadRoomDetails(room.id);
@@ -733,6 +750,7 @@ function App() {
       await joinByInviteCode(joinInviteCode.trim(), user.id);
       setJoinInviteCode('');
       setShowRoomInfo(false);
+      if (isMobile) setMobilePane('chat');
     } catch (err) {
       alert(err.response?.data?.message || 'Invite code noto‘g‘ri');
     }
@@ -781,6 +799,7 @@ function App() {
       setActiveItem(null);
       setMessages([]);
       setShowRoomInfo(false);
+      if (isMobile) setMobilePane('sidebar');
       alert(res.data.message);
     } catch (err) {
       alert(err.response?.data?.message || 'Roomdan chiqishda xatolik');
@@ -837,6 +856,7 @@ function App() {
       setActiveItem(null);
       setMessages([]);
       localStorage.removeItem(STORAGE.activeItem);
+      if (isMobile) setMobilePane('sidebar');
     } catch (err) {
       alert(err.response?.data?.message || 'Chatni o‘chirishda xatolik');
     }
@@ -853,6 +873,7 @@ function App() {
       setRoomDetails(null);
       setShowRoomInfo(false);
       localStorage.removeItem(STORAGE.activeItem);
+      if (isMobile) setMobilePane('sidebar');
     } catch (err) {
       alert(err.response?.data?.message || 'Roomni o‘chirishda xatolik');
     }
@@ -1059,6 +1080,7 @@ function App() {
     setJoinInviteCode('');
     setSelectedMedia(null);
     setMediaInputKey((prev) => prev + 1);
+    if (isMobile) setMobilePane('sidebar');
   };
 
   const handleMediaChange = (e) => {
@@ -1108,31 +1130,194 @@ function App() {
     role: m.role || 'member',
   }));
 
+  const sidebarStyle = isMobile
+    ? { width: '100%', minWidth: '100%' }
+    : { width: `${sidebarWidth}px`, minWidth: `${sidebarWidth}px` };
+
   if (!user) {
     return (
       <div className="auth-page">
         <style>{`
-          :root { --bg:#0b141a; --panel:#111b21; --border:#2a3942; --muted:#8696a0; --accent:#00a884; --text:#e9edef; }
-          * { box-sizing:border-box; }
-          body { margin:0; background:var(--bg); color:var(--text); font-family: Inter, Arial, sans-serif; overflow:hidden; }
-          .auth-page, .chat-layout { width:100vw; height:100vh; background:var(--bg); }
-          .auth-wrapper { height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; }
-          .auth-container { width:min(440px, calc(100vw - 32px)); padding:28px; background:var(--panel); border-radius:20px; box-shadow:0 20px 60px rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.04); }
-          .auth-container h2, .auth-container h3 { margin-top:0; }
-          .auth-container input, .auth-container select, .auth-container textarea {
-            width:100%; padding:12px 14px; background:#2a3942; border:1px solid #3c4b55;
-            color:var(--text); border-radius:12px; outline:none; margin:8px 0 14px;
-          }
-          .auth-container textarea { min-height:90px; resize:vertical; }
-          .auth-container button, .primary-btn {
-            background:var(--accent); color:white; border:none; border-radius:12px; padding:12px 14px; cursor:pointer; font-weight:700;
-          }
-          .ghost-btn { background:#2a3942; color:white; border:none; border-radius:12px; padding:10px 12px; cursor:pointer; }
-          .danger-btn { background:#ef4444; color:white; border:none; border-radius:12px; padding:10px 12px; cursor:pointer; }
-          .lang-row { display:flex; gap:10px; justify-content:center; margin-bottom:20px; }
-          .lang-chip { cursor:pointer; font-weight:700; color:var(--muted); }
-          .lang-chip.active { color:var(--accent); }
-        `}</style>
+  :root {
+    --bg:#0b141a;
+    --panel:#111b21;
+    --border:#2a3942;
+    --muted:#8696a0;
+    --accent:#00a884;
+    --text:#e9edef;
+  }
+
+  * {
+    box-sizing:border-box;
+  }
+
+  html, body, #root {
+    width:100%;
+    height:100%;
+  }
+
+  body {
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:Inter, Arial, sans-serif;
+    overflow:hidden;
+  }
+
+  .auth-page {
+    width:100vw;
+    height:100vh;
+    background:
+      radial-gradient(circle at top, rgba(0,168,132,.12), transparent 40%),
+      var(--bg);
+  }
+
+  .auth-wrapper {
+    width:100%;
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+  }
+
+  .auth-container {
+    width:min(460px, 100%);
+    background:var(--panel);
+    border:1px solid rgba(255,255,255,.05);
+    border-radius:24px;
+    padding:32px;
+    box-shadow:0 20px 60px rgba(0,0,0,.35);
+  }
+
+  .auth-logo {
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    margin-bottom:24px;
+    text-align:center;
+  }
+
+  .auth-logo img {
+    width:72px;
+    height:72px;
+    object-fit:contain;
+    margin-bottom:12px;
+  }
+
+  .auth-logo h1 {
+    margin:0;
+    font-size:42px;
+    color:var(--accent);
+    font-weight:800;
+  }
+
+  .auth-logo p {
+    margin-top:8px;
+    color:var(--muted);
+  }
+
+  .auth-container h2,
+  .auth-container h3 {
+    margin-top:0;
+  }
+
+  .auth-container input,
+  .auth-container select,
+  .auth-container textarea {
+    width:100%;
+    padding:14px 16px;
+    background:#2a3942;
+    border:1px solid #3c4b55;
+    color:var(--text);
+    border-radius:14px;
+    outline:none;
+    margin:8px 0 14px;
+    font-size:15px;
+  }
+
+  .auth-container input:focus,
+  .auth-container textarea:focus {
+    border-color:var(--accent);
+  }
+
+  .auth-container textarea {
+    min-height:90px;
+    resize:vertical;
+  }
+
+  .auth-container button,
+  .primary-btn {
+    width:100%;
+    background:var(--accent);
+    color:white;
+    border:none;
+    border-radius:14px;
+    padding:14px;
+    cursor:pointer;
+    font-weight:700;
+    font-size:15px;
+    transition:.2s;
+  }
+
+  .auth-container button:hover,
+  .primary-btn:hover {
+    opacity:.92;
+  }
+
+  .ghost-btn {
+    background:#2a3942;
+    color:white;
+    border:none;
+    border-radius:12px;
+    padding:10px 12px;
+    cursor:pointer;
+  }
+
+  .danger-btn {
+    background:#ef4444;
+    color:white;
+    border:none;
+    border-radius:12px;
+    padding:10px 12px;
+    cursor:pointer;
+  }
+
+  .lang-row {
+    display:flex;
+    justify-content:center;
+    gap:14px;
+    margin-bottom:24px;
+  }
+
+  .lang-chip {
+    cursor:pointer;
+    font-weight:700;
+    color:var(--muted);
+    transition:.2s;
+  }
+
+  .lang-chip.active {
+    color:var(--accent);
+  }
+
+  @media (max-width:600px) {
+    .auth-container {
+      padding:24px;
+      border-radius:18px;
+    }
+
+    .auth-logo h1 {
+      font-size:34px;
+    }
+
+    .auth-logo img {
+      width:60px;
+      height:60px;
+    }
+  }
+`}</style>
 
         <div className="auth-wrapper">
           <div className="auth-container">
@@ -1140,6 +1325,15 @@ function App() {
               <span className={`lang-chip ${i18n.language === 'uz' ? 'active' : ''}`} onClick={() => changeLang('uz')}>UZ</span>
               <span className={`lang-chip ${i18n.language === 'ru' ? 'active' : ''}`} onClick={() => changeLang('ru')}>RU</span>
               <span className={`lang-chip ${i18n.language === 'en' ? 'active' : ''}`} onClick={() => changeLang('en')}>EN</span>
+            </div>
+
+            <div style={{ textAlign: 'center', marginBottom: '25px' }}>
+              <h1 style={{ margin: 0, fontSize: '34px', color: '#00a884', fontWeight: 800 }}>
+                OnlineAloqa
+              </h1>
+              <p style={{ marginTop: '8px', color: '#8696a0', fontSize: '14px' }}>
+                Real-time Chat Platform
+              </p>
             </div>
 
             {isForgot ? (
@@ -1213,487 +1407,1154 @@ function App() {
   return (
     <div className="chat-layout">
       <style>{`
-        :root { --bg:#0b141a; --panel:#111b21; --border:#2a3942; --muted:#8696a0; --accent:#00a884; --text:#e9edef; }
-        * { box-sizing:border-box; }
-        body { margin:0; background:var(--bg); color:var(--text); font-family: Inter, Arial, sans-serif; overflow:hidden; }
-        .chat-layout { display:flex; width:100vw; height:100vh; background:var(--bg); }
-        .sidebar { height:100vh; background:var(--panel); border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }
-        .sidebar-inner { padding:16px; overflow:auto; height:100%; }
-        .resizer { width:6px; cursor:col-resize; background:transparent; }
-        .resizer:hover { background:rgba(255,255,255,.06); }
-        .chat-area { flex:1; display:flex; flex-direction:column; height:100vh; background:#0b141a; }
-        .chat-header { min-height:64px; display:flex; align-items:center; justify-content:space-between; padding:0 20px; border-bottom:1px solid var(--border); background:rgba(17,27,33,.75); backdrop-filter: blur(10px); font-weight:700; gap:16px; cursor:pointer; }
-        .messages-container { flex:1; overflow:auto; padding:20px; display:flex; flex-direction:column; gap:10px; }
-        .message { max-width:min(72%, 720px); padding:10px 14px; border-radius:14px; line-height:1.4; word-break:break-word; white-space:pre-wrap; position:relative; }
-        .message.sent { align-self:flex-end; background:#005c4b; }
-        .message.received { align-self:flex-start; background:#202c33; }
-        .message.highlighted { outline:2px solid #00a884; box-shadow:0 0 0 2px rgba(0, 168, 132, .25); }
-        .message-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
-        .msg-btn { border:none; background:#2a3942; color:#e9edef; border-radius:10px; padding:6px 8px; cursor:pointer; font-size:12px; }
-        .input-area { display:flex; gap:10px; padding:16px; border-top:1px solid var(--border); background:rgba(17,27,33,.9); align-items:center; }
-        .input-area input[type="text"] {
-          flex:1; width:100%; padding:12px 14px; background:#2a3942; border:1px solid #3c4b55;
-          color:var(--text); border-radius:12px; outline:none;
-        }
-        .primary-btn { background:var(--accent); color:white; border:none; border-radius:12px; padding:12px 14px; cursor:pointer; font-weight:700; }
-        .ghost-btn { background:#2a3942; color:white; border:none; border-radius:12px; padding:10px 12px; cursor:pointer; }
-        .danger-btn { background:#ef4444; color:white; border:none; border-radius:12px; padding:10px 12px; cursor:pointer; }
-        .chip { display:flex; align-items:center; gap:10px; padding:12px; border-radius:12px; cursor:pointer; margin-bottom:6px; }
-        .chip.active { background:#2a3942; }
-        .muted { color:var(--muted); }
-        .section-title { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:18px 0 8px; }
-        .stack { display:flex; gap:10px; flex-wrap:wrap; }
-        .list-scroll { max-height: calc(100vh - 220px); overflow:auto; padding-right:4px; }
-        .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.72); display:flex; align-items:center; justify-content:center; z-index:1000; padding:16px; }
-        .modal-card { width:min(760px, 100%); max-height:calc(100vh - 32px); overflow:auto; background:var(--panel); border-radius:20px; padding:22px; border:1px solid rgba(255,255,255,.04); box-shadow:0 20px 60px rgba(0,0,0,.35); }
-        .modal-card input, .modal-card select, .modal-card textarea {
-          width:100%; padding:12px 14px; background:#2a3942; border:1px solid #3c4b55;
-          color:var(--text); border-radius:12px; outline:none; margin:8px 0 14px;
-        }
-        .modal-card textarea { min-height:92px; resize:vertical; }
-        .badge { display:inline-flex; align-items:center; padding:4px 8px; border-radius:999px; font-size:12px; background:#2a3942; color:#e9edef; margin-left:8px; }
-        .small { font-size:12px; color:var(--muted); }
-        .reply-box { padding:10px 12px; background:#17232c; border:1px solid #2a3942; border-radius:12px; margin:0 16px 10px; display:flex; justify-content:space-between; gap:12px; align-items:center; }
-        .emoji-row { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
-        .media-preview { width:100%; max-width:220px; border-radius:12px; display:block; margin-top:8px; }
+  :root {
+    --bg:#0b141a;
+    --panel:#111b21;
+    --border:#2a3942;
+    --muted:#8696a0;
+    --accent:#00a884;
+    --text:#e9edef;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    width: 100%;
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, Arial, sans-serif;
+    overflow: hidden;
+  }
+
+  .chat-layout {
+    display: flex;
+    width: 100vw;
+    height: 100vh;
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  .sidebar {
+  height: 100vh;
+  width: 340px;
+  min-width: 300px;
+  max-width: 420px;
+  background: #111b21;
+  border-right: 1px solid #2a3942;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.sidebar-inner {
+  padding: 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  height: 100%;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #2a3942;
+}
+
+.sidebar-brand img {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.sidebar-brand-title {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.sidebar-brand-subtitle {
+  font-size: 12px;
+  color: #8696a0;
+  margin-top: 2px;
+}
+
+.sidebar-greeting {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 6px 0 16px;
+}
+
+.sidebar-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.sidebar-card {
+  background: #17232c;
+  border: 1px solid #2a3942;
+  border-radius: 16px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.sidebar-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #8696a0;
+  font-weight: 700;
+}
+
+.sidebar-input {
+  width: 100%;
+  padding: 12px 14px;
+  background: #2a3942;
+  border: 1px solid #3c4b55;
+  color: #e9edef;
+  border-radius: 12px;
+  outline: none;
+  font-size: 14px;
+}
+
+.sidebar-input:focus {
+  border-color: #00a884;
+}
+
+.sidebar-btn {
+  width: 100%;
+  background: #00a884;
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.sidebar-btn.secondary {
+  background: #2a3942;
+}
+
+.sidebar-section-title {
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #8696a0;
+  font-weight: 700;
+  margin: 18px 0 10px;
+}
+
+.room-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: .15s ease;
+  margin-bottom: 8px;
+  text-align: left;
+}
+
+.room-item:hover {
+  background: #17232c;
+  border-color: #2a3942;
+}
+
+.room-item.active {
+  background: #1f2c35;
+  border-color: #00a884;
+}
+
+.room-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #2a3942;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #81a1c1;
+  font-weight: 800;
+}
+
+.room-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.room-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e9edef;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.room-meta {
+  font-size: 12px;
+  color: #8696a0;
+  margin-top: 2px;
+}
+  .resizer {
+    width: 6px;
+    cursor: col-resize;
+    background: transparent;
+    flex-shrink: 0;
+  }
+
+  .resizer:hover {
+    background: rgba(255,255,255,.06);
+  }
+
+  .chat-area {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: #0b141a;
+    overflow: hidden;
+  }
+
+  .chat-header {
+    min-height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(17,27,33,.82);
+    backdrop-filter: blur(10px);
+    font-weight: 700;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .messages-container {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .message {
+    max-width: min(72%, 720px);
+    padding: 10px 14px;
+    border-radius: 14px;
+    line-height: 1.4;
+    word-break: break-word;
+    white-space: pre-wrap;
+    position: relative;
+  }
+
+  .message.sent {
+    align-self: flex-end;
+    background: #005c4b;
+  }
+
+  .message.received {
+    align-self: flex-start;
+    background: #202c33;
+  }
+
+  .message.highlighted {
+    outline: 2px solid #00a884;
+    box-shadow: 0 0 0 2px rgba(0, 168, 132, .25);
+  }
+
+  .message-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  .msg-btn {
+    border: none;
+    background: #2a3942;
+    color: #e9edef;
+    border-radius: 10px;
+    padding: 6px 8px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  .input-area {
+    display: flex;
+    gap: 10px;
+    padding: 16px;
+    border-top: 1px solid var(--border);
+    background: rgba(17,27,33,.95);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .input-area input[type="text"] {
+    flex: 1;
+    min-width: 220px;
+    width: 100%;
+    padding: 12px 14px;
+    background: #2a3942;
+    border: 1px solid #3c4b55;
+    color: var(--text);
+    border-radius: 12px;
+    outline: none;
+  }
+
+  .primary-btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 14px;
+    cursor: pointer;
+    font-weight: 700;
+  }
+
+  .ghost-btn {
+    background: #2a3942;
+    color: white;
+    border: none;
+    border-radius: 12px;
+    padding: 10px 12px;
+    cursor: pointer;
+  }
+
+  .danger-btn {
+    background: #ef4444;
+    color: white;
+    border: none;
+    border-radius: 12px;
+    padding: 10px 12px;
+    cursor: pointer;
+  }
+
+  .chip {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 12px;
+    cursor: pointer;
+    margin-bottom: 6px;
+  }
+
+  .chip.active {
+    background: #2a3942;
+  }
+
+  .muted {
+    color: var(--muted);
+  }
+
+  .section-title {
+    font-size: 12px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 18px 0 8px;
+  }
+
+  .stack {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .list-scroll {
+    max-height: calc(100vh - 220px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 4px;
+  }
+
+  .field {
+    width: 100%;
+    margin-bottom: 14px;
+  }
+
+  .field label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .field input,
+  .field textarea,
+  .field select {
+    width: 100%;
+    padding: 12px 14px;
+    background: #2a3942;
+    border: 1px solid #3c4b55;
+    color: var(--text);
+    border-radius: 12px;
+    outline: none;
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 16px;
+  }
+
+  .modal-card {
+    width: min(760px, 100%);
+    max-height: calc(100vh - 32px);
+    overflow: auto;
+    background: var(--panel);
+    border-radius: 20px;
+    padding: 22px;
+    border: 1px solid rgba(255,255,255,.04);
+    box-shadow: 0 20px 60px rgba(0,0,0,.35);
+  }
+
+  .modal-card input,
+  .modal-card select,
+  .modal-card textarea {
+    width: 100%;
+    padding: 12px 14px;
+    background: #2a3942;
+    border: 1px solid #3c4b55;
+    color: var(--text);
+    border-radius: 12px;
+    outline: none;
+    margin: 8px 0 14px;
+  }
+
+  .modal-card textarea {
+    min-height: 92px;
+    resize: vertical;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    background: #2a3942;
+    color: #e9edef;
+    margin-left: 8px;
+  }
+
+  .small {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .reply-box {
+    padding: 10px 12px;
+    background: #17232c;
+    border: 1px solid #2a3942;
+    border-radius: 12px;
+    margin: 0 16px 10px;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .emoji-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  .media-preview {
+    width: 100%;
+    max-width: 220px;
+    border-radius: 12px;
+    display: block;
+    margin-top: 8px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 15px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand img {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+
+  .desktop-only {
+    display: block;
+  }
+
+  .mobile-back {
+    display: none;
+  }
+
+  .hide-mobile {
+    display: block;
+  }
+
+  @media (max-width: 900px) {
+    .chat-layout {
+      flex-direction: column;
+    }
+
+    .sidebar {
+      width: 100% !important;
+      min-width: 100% !important;
+      max-width: 100%;
+      height: auto;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .chat-area {
+      width: 100%;
+      height: calc(100vh - 280px);
+    }
+
+    .chat-header {
+      padding: 12px 14px;
+    }
+
+    .messages-container {
+      padding: 12px;
+    }
+
+    .input-area {
+      padding: 12px;
+    }
+
+    .input-area input[type="text"] {
+      min-width: 100%;
+      order: 2;
+    }
+
+    .input-area input[type="file"] {
+      order: 1;
+      max-width: 100% !important;
+      width: 100%;
+    }
+
+    .input-area button[type="submit"] {
+      order: 3;
+      width: 100%;
+    }
+
+    .stack {
+      flex-direction: column;
+    }
+
+    .stack > button {
+      width: 100%;
+    }
+  }
+
+  @media (max-width: 600px) {
+    .sidebar-inner,
+    .messages-container {
+      padding: 12px;
+    }
+
+    .chat-header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .modal-card {
+      width: 100%;
+    }
+      }}
       `}</style>
 
-      <div className="sidebar" style={{ width: `${sidebarWidth}px`, minWidth: `${sidebarWidth}px` }}>
-        <div className="sidebar-inner">
-          <div style={{ marginBottom: '15px', borderBottom: '1px solid #2a3942', paddingBottom: '15px' }}>
-            <h3 style={{ marginTop: 0 }}>{t('welcome')}, @{user.nickname}!</h3>
-            <div className="stack">
-              <button className="ghost-btn" onClick={() => setShowSettings((prev) => !prev)}>
-                {showSettings ? t('back') : t('settings')}
-              </button>
-              <button className="danger-btn" onClick={handleLogout}>{t('logout')}</button>
-            </div>
-          </div>
+{(!isMobile || mobilePane === 'sidebar') && (
+  <div className="sidebar" style={sidebarStyle}>
+    <div className="sidebar-inner">
+    <div className="sidebar-brand">
+  <img src="/logo.png" alt="OnlineAloqa" />
+  <div>
+    <div className="sidebar-brand-title">OnlineAloqa</div>
+    <div className="sidebar-brand-subtitle">Real-time Chat Platform</div>
+  </div>
+</div>
 
-          {showSettings ? (
-            <div>
-              <form onSubmit={handleUpdateProfile}>
-                <label className="muted" style={{ fontSize: '12px' }}>{t('username_label')}</label>
-                <input
-                  type="text"
-                  value={newNickname}
-                  onChange={(e) => setNewNickname(e.target.value)}
-                  placeholder={t('placeholder_nickname')}
-                />
-
-                <label className="muted" style={{ fontSize: '12px' }}>{t('email_label')}</label>
-                <input
-                  type="email"
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                  placeholder={t('placeholder_email')}
-                />
-
-                <label className="muted" style={{ fontSize: '12px' }}>{t('new_password_label')}</label>
-                <input
-                  type="password"
-                  placeholder={t('placeholder_new_password')}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                />
-
-                <div style={{ marginTop: '15px', marginBottom: '15px' }}>
-                  <p className="section-title" style={{ marginTop: 0 }}>{t('select_lang')}</p>
-                  <div className="stack">
-                    <button type="button" className="ghost-btn" onClick={() => changeLang('uz')}>UZ</button>
-                    <button type="button" className="ghost-btn" onClick={() => changeLang('ru')}>RU</button>
-                    <button type="button" className="ghost-btn" onClick={() => changeLang('en')}>EN</button>
-                  </div>
-                </div>
-
-                <button type="submit" className="primary-btn" style={{ width: '100%' }}>
-                  {t('save')}
-                </button>
-
-                <button
-                  type="button"
-                  className="danger-btn"
-                  style={{ width: '100%', marginTop: '12px' }}
-                  onClick={() => setShowDeleteAccountModal(true)}
-                >
-                  Accountni o‘chirish
-                </button>
-              </form>
-            </div>
-          ) : (
-            <div className="list-scroll">
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="ghost-btn"
-                style={{ width: '100%', textAlign: 'left', marginBottom: '15px', fontWeight: 700 }}
-              >
-                ➕ {t('create_room')}
-              </button>
-
-              <h4 className="section-title">{t('search_user')}</h4>
-              <input
-                type="text"
-                placeholder={t('placeholder_nickname')}
-                value={searchNickname}
-                onChange={(e) => setSearchNickname(e.target.value)}
-              />
-              <button
-                onClick={handleSearchUser}
-                className="primary-btn"
-                style={{ width: '100%', marginBottom: '15px' }}
-              >
-                {t('start_chat')}
-              </button>
-
-              <h4 className="section-title">{t('room_username')} {t('search')}</h4>
-              <input
-                type="text"
-                placeholder={t('room_username')}
-                value={searchRoomUsername}
-                onChange={(e) => setSearchRoomUsername(e.target.value)}
-              />
-              <button
-                onClick={handleSearchRoomByUsername}
-                className="primary-btn"
-                style={{ width: '100%', marginBottom: '15px' }}
-              >
-                {t('search')}
-              </button>
-
-              <h4 className="section-title">{t('join_room')} {t('copy_link')}</h4>
-              <input
-                type="text"
-                placeholder="invite code"
-                value={joinInviteCode}
-                onChange={(e) => setJoinInviteCode(e.target.value)}
-              />
-              <button
-                onClick={handleJoinByInviteCode}
-                className="ghost-btn"
-                style={{ width: '100%', marginBottom: '15px' }}
-              >
-                {t('join_room')}
-              </button>
-
-              {roomList.length > 0 && <h4 className="section-title">{t('channels_groups')}</h4>}
-              {roomList.map((room) => {
-                const memberCount = Array.isArray(room.members) ? room.members.length : 0;
-                return (
-                  <div
-                    key={room.id}
-                    onClick={() => {
-                      setShowSettings(false);
-                      setActiveItem({
-                        type: 'room',
-                        id: room.id,
-                        label: room.name,
-                        roomType: room.type,
-                        creator: room.owner,
-                      });
-                      setShowRoomInfo(false);
-                      loadRoomDetails(room.id);
-                    }}
-                    className={`chip ${activeItem?.type === 'room' && sameId(activeItem.id, room.id) ? 'active' : ''}`}
-                  >
-                    <span style={{ color: '#81a1c1' }}>{room.type === 'channel' ? '#' : '👥'}</span>
-                    <span style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span>{room.name}</span>
-                      <span className="small">{memberCount} {t('members')}</span>
-                    </span>
-                  </div>
-                );
-              })}
-
-              <h4 className="section-title">{t('direct_messages')}</h4>
-              {chatList.map((chatUser) => (
-                <div
-                  key={chatUser.id}
-                  onClick={() => {
-                    setShowSettings(false);
-                    setActiveItem({
-                      type: 'user',
-                      id: chatUser.id,
-                      label: chatUser.nickname,
-                    });
-                    setShowRoomInfo(false);
-                  }}
-                  className={`chip ${activeItem?.type === 'user' && sameId(activeItem.id, chatUser.id) ? 'active' : ''}`}
-                >
-                  <span style={{ color: '#00a884' }}>●</span>
-                  <span>@{chatUser.nickname}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+      <div className="sidebar-greeting">
+        {t('welcome')}, @{user.nickname}!
       </div>
 
-      <div className="resizer" onMouseDown={() => { isResizing.current = true; document.body.style.cursor = 'col-resize'; }} />
-
-      <div className="chat-area">
-        {activeItem ? (
-          <>
-            <div
-              className="chat-header"
-              onClick={() => {
-                if (activeItem.type === 'room') {
-                  setShowRoomInfo(true);
-                  loadRoomDetails(activeItem.id);
-                }
-              }}
-              title={activeItem.type === 'room' ? 'Room info' : ''}
-            >
-              <span>{activeHeaderText}</span>
-
-              <div className="stack" onClick={(e) => e.stopPropagation()}>
-                {activeItem.type === 'user' && (
-                  <button className="ghost-btn" onClick={handleDeleteChat}>
-                    {t('remove')}
-                  </button>
-                )}
-
-                {activeItem.type === 'room' && isOwner && (
-                  <button className="danger-btn" onClick={handleDeleteRoom}>
-                    {t('remove')}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {replyToMessage && (
-              <div className="reply-box">
-                <div>
-                  <div className="small">Replying to</div>
-                  <div style={{ fontWeight: 700 }}>
-                    {replyToMessage.sender?.nickname ? `@${replyToMessage.sender.nickname}` : '@unknown'}
-                  </div>
-                  <div>{replyToMessage.deletedForAll ? '[deleted]' : replyToMessage.messageText}</div>
-                </div>
-                <button className="ghost-btn" type="button" onClick={() => setReplyToMessage(null)}>
-                  {t('cancel')}
-                </button>
-              </div>
+      <div className="sidebar-actions">
+        <button
+          className="ghost-btn"
+          onClick={() => {
+            setShowSettings((prev) => !prev);
+            setShowCreateModal(false);
+            setShowRoomInfo(false);
+            if (isMobile) setMobilePane('sidebar');
+          }}
+        >
+          {showSettings ? t('back') : t('settings')}
+        </button>
+        <button className="danger-btn" onClick={handleLogout}>
+          {t('logout')}
+        </button>
+      </div>
+      
+  {showSettings ? (
+    <div className="sidebar-card">
+      <form onSubmit={handleUpdateProfile}>
+        <label className="sidebar-label">{t('username_label')}</label>
+        <input
+          className="sidebar-input"
+          type="text"
+          value={newNickname}
+          onChange={(e) => setNewNickname(e.target.value)}
+          placeholder={t('placeholder_nickname')}
+        />
+  
+        <label className="sidebar-label">{t('email_label')}</label>
+        <input
+          className="sidebar-input"
+          type="email"
+          value={newEmail}
+          onChange={(e) => setNewEmail(e.target.value)}
+          placeholder={t('placeholder_email')}
+        />
+  
+        <label className="sidebar-label">{t('new_password_label')}</label>
+        <input
+          className="sidebar-input"
+          type="password"
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          placeholder={t('placeholder_new_password')}
+        />
+  
+        <div className="sidebar-section-title">{t('select_lang')}</div>
+        <div className="stack">
+          <button type="button" className="ghost-btn" onClick={() => changeLang('uz')}>UZ</button>
+          <button type="button" className="ghost-btn" onClick={() => changeLang('ru')}>RU</button>
+          <button type="button" className="ghost-btn" onClick={() => changeLang('en')}>EN</button>
+        </div>
+  
+        <button type="submit" className="sidebar-btn" style={{ marginTop: '14px' }}>
+          {t('save')}
+        </button>
+  
+        <button
+          type="button"
+          className="sidebar-btn secondary"
+          style={{ marginTop: '12px', background: '#ef4444' }}
+          onClick={() => setShowDeleteAccountModal(true)}
+        >
+          Accountni o‘chirish
+        </button>
+      </form>
+    </div>
+  ) : (
+    <div className="list-scroll">
+    <button
+      onClick={() => {
+        setShowCreateModal(true);
+        setShowSettings(false);
+        if (isMobile) setMobilePane('sidebar');
+      }}
+      className="ghost-btn"
+      style={{
+        width: '100%',
+        textAlign: 'left',
+        marginBottom: '15px',
+        fontWeight: 700,
+        padding: '12px 14px',
+        borderRadius: '14px'
+      }}
+    >
+      ➕ {t('create_room')}
+    </button>
+  
+    <div
+      style={{
+        background: '#17232c',
+        border: '1px solid #2a3942',
+        borderRadius: '16px',
+        padding: '14px',
+        marginBottom: '14px'
+      }}
+    >
+      <div className="section-title" style={{ marginTop: 0 }}>
+        {t('search_user')}
+      </div>
+      <input
+        type="text"
+        placeholder={t('placeholder_nickname')}
+        value={searchNickname}
+        onChange={(e) => setSearchNickname(e.target.value)}
+        style={{
+          width: '100%',
+          padding: '12px 14px',
+          background: '#2a3942',
+          border: '1px solid #3c4b55',
+          color: '#e9edef',
+          borderRadius: '12px',
+          outline: 'none'
+        }}
+      />
+      <button
+        onClick={handleSearchUser}
+        className="primary-btn"
+        style={{ width: '100%', marginTop: '10px' }}
+      >
+        {t('start_chat')}
+      </button>
+    </div>
+  
+    <div
+      style={{
+        background: '#17232c',
+        border: '1px solid #2a3942',
+        borderRadius: '16px',
+        padding: '14px',
+        marginBottom: '14px'
+      }}
+    >
+      <div className="section-title" style={{ marginTop: 0 }}>
+        {t('room_username')} {t('search')}
+      </div>
+      <input
+        type="text"
+        placeholder={t('room_username')}
+        value={searchRoomUsername}
+        onChange={(e) => setSearchRoomUsername(e.target.value)}
+        style={{
+          width: '100%',
+          padding: '12px 14px',
+          background: '#2a3942',
+          border: '1px solid #3c4b55',
+          color: '#e9edef',
+          borderRadius: '12px',
+          outline: 'none'
+        }}
+      />
+      <button
+        onClick={handleSearchRoomByUsername}
+        className="primary-btn"
+        style={{ width: '100%', marginTop: '10px' }}
+      >
+        {t('search')}
+      </button>
+    </div>
+  
+    <div
+      style={{
+        background: '#17232c',
+        border: '1px solid #2a3942',
+        borderRadius: '16px',
+        padding: '14px',
+        marginBottom: '14px'
+      }}
+    >
+      <div className="section-title" style={{ marginTop: 0 }}>
+        {t('join_room')} / Invite
+      </div>
+      <input
+        type="text"
+        placeholder="invite code"
+        value={joinInviteCode}
+        onChange={(e) => setJoinInviteCode(e.target.value)}
+        style={{
+          width: '100%',
+          padding: '12px 14px',
+          background: '#2a3942',
+          border: '1px solid #3c4b55',
+          color: '#e9edef',
+          borderRadius: '12px',
+          outline: 'none'
+        }}
+      />
+      <button
+        onClick={handleJoinByInviteCode}
+        className="ghost-btn"
+        style={{ width: '100%', marginTop: '10px' }}
+      >
+        {t('join_room')}
+      </button>
+    </div>
+  
+    {roomList.length > 0 && (
+      <h4 className="section-title">{t('channels_groups')}</h4>
+    )}
+  
+    {roomList.map((room) => {
+      const memberCount = Array.isArray(room.members) ? room.members.length : 0;
+      const active = activeItem?.type === 'room' && sameId(activeItem.id, room.id);
+  
+      return (
+        <div
+          key={room.id}
+          onClick={() => {
+            setShowSettings(false);
+            setShowCreateModal(false);
+            setActiveItem({
+              type: 'room',
+              id: room.id,
+              label: room.name,
+              roomType: room.type,
+              creator: room.owner,
+            });
+            setShowRoomInfo(false);
+            if (isMobile) setMobilePane('chat');
+            loadRoomDetails(room.id);
+          }}
+          className={`chip ${active ? 'active' : ''}`}
+          style={{
+            background: active ? '#1f2c35' : 'transparent',
+            border: active ? '1px solid #00a884' : '1px solid transparent',
+            marginBottom: '8px'
+          }}
+        >
+          <span style={{ color: '#81a1c1' }}>
+            {room.type === 'channel' ? '#' : '👥'}
+          </span>
+          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <span>{room.name}</span>
+            <span className="small">{memberCount} {t('members')}</span>
+          </span>
+        </div>
+      );
+    })}
+  </div>
             )}
+          </div>
+        </div>
+      )}
 
-            {forwardMessage && (
-              <div className="reply-box">
-                <div>
-                  <div className="small">Forward draft</div>
-                  <div style={{ fontWeight: 700 }}>
-                    {forwardMessage.sender?.nickname ? `@${forwardMessage.sender.nickname}` : '@unknown'}
-                  </div>
-                  <div>{forwardMessage.deletedForAll ? '[deleted]' : forwardMessage.messageText}</div>
+      {!isMobile && <div className="resizer desktop-only" onMouseDown={() => { isResizing.current = true; document.body.style.cursor = 'col-resize'; }} />}
+
+      {(!isMobile || mobilePane === 'chat') && (
+        <div className="chat-area">
+          {activeItem ? (
+            <>
+              <div className="chat-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                  {isMobile && (
+                    <button
+                      className="ghost-btn mobile-back"
+                      type="button"
+                      onClick={() => setMobilePane('sidebar')}
+                    >
+                      ←
+                    </button>
+                  )}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {activeHeaderText}
+                  </span>
                 </div>
-                <button className="ghost-btn" type="button" onClick={() => setForwardMessage(null)}>
-                  {t('cancel')}
-                </button>
-              </div>
-            )}
 
-            {selectedMedia && (
-              <div className="reply-box" style={{ alignItems: 'flex-start' }}>
-                <div>
-                  <div className="small">Selected image</div>
-                  <div style={{ fontWeight: 700 }}>{selectedMedia.name}</div>
-                  <img src={selectedMedia.dataUrl} alt={selectedMedia.name} className="media-preview" />
+                <div className="stack" onClick={(e) => e.stopPropagation()}>
+                  {activeItem.type === 'room' && (
+                    <button
+                      className="ghost-btn"
+                      type="button"
+                      onClick={() => {
+                        setShowRoomInfo(true);
+                        if (isMobile) setMobilePane('chat');
+                        loadRoomDetails(activeItem.id);
+                      }}
+                    >
+                      {t('members')}
+                    </button>
+                  )}
+
+                  {activeItem.type === 'user' && (
+                    <button className="ghost-btn" onClick={handleDeleteChat}>
+                      {t('remove')}
+                    </button>
+                  )}
+
+                  {activeItem.type === 'room' && isOwner && (
+                    <button className="danger-btn" onClick={handleDeleteRoom}>
+                      {t('remove')}
+                    </button>
+                  )}
                 </div>
-                <button
-                  className="ghost-btn"
-                  type="button"
-                  onClick={() => {
-                    setSelectedMedia(null);
-                    setMediaInputKey((prev) => prev + 1);
-                  }}
-                >
-                  {t('cancel')}
-                </button>
               </div>
-            )}
 
-            <div className="messages-container">
-              {pinnedMessages.length > 0 && (
-                <div style={{ padding: '10px 12px', border: '1px solid #2a3942', borderRadius: '12px', marginBottom: '12px', background: '#111b21' }}>
-                  <div className="small" style={{ marginBottom: '6px' }}>Pinned messages</div>
-                  {pinnedMessages.map((p) => (
-                    <div key={p.id} style={{ fontSize: '13px', marginBottom: '4px' }}>
-                      • {p.deletedForAll ? '[deleted]' : p.messageText || p.mediaName || 'media'}
+              {replyToMessage && (
+                <div className="reply-box">
+                  <div>
+                    <div className="small">Replying to</div>
+                    <div style={{ fontWeight: 700 }}>
+                      {replyToMessage.sender?.nickname ? `@${replyToMessage.sender.nickname}` : '@unknown'}
                     </div>
-                  ))}
+                    <div>{replyToMessage.deletedForAll ? '[deleted]' : replyToMessage.messageText || replyToMessage.mediaName || ''}</div>
+                  </div>
+                  <button className="ghost-btn" type="button" onClick={() => setReplyToMessage(null)}>
+                    {t('cancel')}
+                  </button>
                 </div>
               )}
 
-              {messages.map((msg) => {
-                const currentUserId = user.id;
-                const senderId = getId(msg.sender);
-                const isMe = sameId(senderId, currentUserId);
-                const canDelete = isMe || (activeItem.type === 'room' && isOwner);
-                const roomPinned = roomDetails?.pinnedMessages?.some((id) => sameId(id, msg.id));
-
-                const resolvedReply = resolveReplyTarget(msg.replyTo);
-                const resolvedForward = resolveReplyTarget(msg.forwardedFrom);
-
-                const groupedReactions = (msg.reactions || []).reduce((acc, r) => {
-                  acc[r.emoji] = acc[r.emoji] || [];
-                  acc[r.emoji].push(r.user);
-                  return acc;
-                }, {});
-
-                return (
-                  <div
-                    key={msg.id}
-                    id={`msg-${msg.id}`}
-                    ref={(el) => {
-                      if (el) messageRefs.current[msg.id] = el;
-                    }}
-                    className={`message ${isMe ? 'sent' : 'received'} ${highlightedMessageId === msg.id ? 'highlighted' : ''}`}
-                  >
-                    {activeItem.type === 'room' && !isMe && msg.sender?.nickname && (
-                      <span style={{ display: 'block', fontSize: '11px', color: '#81a1c1', marginBottom: '3px' }}>
-                        @{msg.sender.nickname}
-                      </span>
-                    )}
-
-                    {msg.replyTo && (
-                      <button
-                        type="button"
-                        onClick={() => handleScrollToMessage(msg.replyTo.id || msg.replyTo)}
-                        style={{
-                          width: '100%',
-                          textAlign: 'left',
-                          fontSize: '12px',
-                          opacity: 0.9,
-                          borderLeft: '3px solid #8696a0',
-                          paddingLeft: '8px',
-                          marginBottom: '8px',
-                          background: 'transparent',
-                          color: 'inherit',
-                          borderTop: 'none',
-                          borderRight: 'none',
-                          borderBottom: 'none',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Reply to:{' '}
-                        {resolvedReply?.sender?.nickname ? `@${resolvedReply.sender.nickname}` : ''}
-                        {' '}
-                        {resolvedReply?.deletedForAll
-                          ? '[deleted]'
-                          : (resolvedReply?.messageText || resolvedReply?.mediaName || '[message]')}
-                      </button>
-                    )}
-
-                    {msg.forwardedFrom && (
-                      <div style={{ fontSize: '12px', opacity: 0.85, marginBottom: '8px' }}>
-                        Forwarded from{' '}
-                        {resolvedForward?.sender?.nickname ? `@${resolvedForward.sender.nickname}` : ''}
-                        {' '}
-                        {resolvedForward?.deletedForAll
-                          ? '[deleted]'
-                          : (resolvedForward?.messageText || resolvedForward?.mediaName || '[message]')}
-                      </div>
-                    )}
-
-                    {msg.mediaUrl && msg.mediaType === 'image' && (
-                      <img
-                        src={msg.mediaUrl}
-                        alt={msg.mediaName || 'image'}
-                        style={{ maxWidth: '100%', borderRadius: '12px', display: 'block', marginBottom: msg.messageText ? '8px' : '0' }}
-                      />
-                    )}
-
-                    <div>
-                      {msg.deletedForAll
-                        ? '[deleted]'
-                        : (msg.messageText || (msg.mediaUrl ? msg.mediaName || 'image' : ''))}
+              {forwardMessage && (
+                <div className="reply-box">
+                  <div>
+                    <div className="small">Forward draft</div>
+                    <div style={{ fontWeight: 700 }}>
+                      {forwardMessage.sender?.nickname ? `@${forwardMessage.sender.nickname}` : '@unknown'}
                     </div>
-
-                    {Object.keys(groupedReactions).length > 0 && (
-                      <div className="emoji-row">
-                        {Object.entries(groupedReactions).map(([emoji, users]) => (
-                          <span key={emoji} className="badge">
-                            {emoji} {users.length}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="message-actions">
-                      <button className="msg-btn" type="button" onClick={() => setReplyToMessage(msg)}>{t('back')}</button>
-                      <button className="msg-btn" type="button" onClick={() => setForwardMessage(msg)}>Forward</button>
-
-                      {EMOJIS.map((emoji) => (
-                        <button
-                          key={emoji}
-                          className="msg-btn"
-                          type="button"
-                          onClick={() => handleReactMessage(msg.id, emoji)}
-                        >
-                          {emoji}
-                        </button>
-                      ))}
-
-                      {activeItem.type === 'room' && isAdmin && !roomPinned && (
-                        <button
-                          className="msg-btn"
-                          type="button"
-                          onClick={() => axios.post(`${ROOM_URL}/${activeItem.id}/pin/${msg.id}`, { userId: user.id }).then(() => loadRoomDetails(activeItem.id))}
-                        >
-                          Pin
-                        </button>
-                      )}
-
-                      {activeItem.type === 'room' && isAdmin && roomPinned && (
-                        <button
-                          className="msg-btn"
-                          type="button"
-                          onClick={() => axios.delete(`${ROOM_URL}/${activeItem.id}/pin/${msg.id}`, { data: { userId: user.id } }).then(() => loadRoomDetails(activeItem.id))}
-                        >
-                          Unpin
-                        </button>
-                      )}
-
-                      {canDelete && (
-                        <button className="msg-btn" type="button" onClick={() => handleDeleteMessageForAll(msg.id)}>
-                          Delete for all
-                        </button>
-                      )}
-                    </div>
+                    <div>{forwardMessage.deletedForAll ? '[deleted]' : forwardMessage.messageText || forwardMessage.mediaName || ''}</div>
                   </div>
-                );
-              })}
-              <div ref={messagesEndRef} />
-            </div>
+                  <button className="ghost-btn" type="button" onClick={() => setForwardMessage(null)}>
+                    {t('cancel')}
+                  </button>
+                </div>
+              )}
 
-            <form onSubmit={handleSendMessage} className="input-area">
-              <input
-                key={mediaInputKey}
-                type="file"
-                accept="image/*"
-                onChange={handleMediaChange}
-                style={{ maxWidth: '180px', background: 'transparent', border: 'none', padding: '0', color: '#e9edef' }}
-              />
-              <input
-                type="text"
-                placeholder={activeItem.type === 'room' && roomDetails?.type === 'channel' && !canWriteRoom(roomDetails, user.id) ? 'Only admin can write here' : '...'}
-                value={messageText}
-                onChange={(e) => setMessageText(e.target.value)}
-                disabled={activeItem.type === 'room' && roomDetails?.type === 'channel' && !canWriteRoom(roomDetails, user.id)}
-              />
-              <button
-                type="submit"
-                className="primary-btn"
-                disabled={activeItem.type === 'room' && roomDetails?.type === 'channel' && !canWriteRoom(roomDetails, user.id)}
-              >
-                {t('send')}
-              </button>
-            </form>
-          </>
-        ) : (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0', fontSize: '16px' }}>
-            {t('empty_chat')}
-          </div>
-        )}
-      </div>
+              {selectedMedia && (
+                <div className="reply-box" style={{ alignItems: 'flex-start' }}>
+                  <div>
+                    <div className="small">Selected image</div>
+                    <div style={{ fontWeight: 700 }}>{selectedMedia.name}</div>
+                    <img src={selectedMedia.dataUrl} alt={selectedMedia.name} className="media-preview" />
+                  </div>
+                  <button
+                    className="ghost-btn"
+                    type="button"
+                    onClick={() => {
+                      setSelectedMedia(null);
+                      setMediaInputKey((prev) => prev + 1);
+                    }}
+                  >
+                    {t('cancel')}
+                  </button>
+                </div>
+              )}
+
+              <div className="messages-container">
+                {pinnedMessages.length > 0 && (
+                  <div style={{ padding: '10px 12px', border: '1px solid #2a3942', borderRadius: '12px', marginBottom: '12px', background: '#111b21' }}>
+                    <div className="small" style={{ marginBottom: '6px' }}>Pinned messages</div>
+                    {pinnedMessages.map((p) => (
+                      <div key={p.id} style={{ fontSize: '13px', marginBottom: '4px' }}>
+                        • {p.deletedForAll ? '[deleted]' : p.messageText || p.mediaName || 'media'}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {messages.map((msg) => {
+                  const currentUserId = user.id;
+                  const senderId = getId(msg.sender);
+                  const isMe = sameId(senderId, currentUserId);
+                  const canDelete = isMe || (activeItem.type === 'room' && isOwner);
+                  const roomPinned = roomDetails?.pinnedMessages?.some((id) => sameId(id, msg.id));
+
+                  const resolvedReply = resolveReplyTarget(msg.replyTo);
+                  const resolvedForward = resolveReplyTarget(msg.forwardedFrom);
+
+                  const groupedReactions = (msg.reactions || []).reduce((acc, r) => {
+                    acc[r.emoji] = acc[r.emoji] || [];
+                    acc[r.emoji].push(r.user);
+                    return acc;
+                  }, {});
+
+                  return (
+                    <div
+                      key={msg.id}
+                      id={`msg-${msg.id}`}
+                      ref={(el) => {
+                        if (el) messageRefs.current[msg.id] = el;
+                      }}
+                      className={`message ${isMe ? 'sent' : 'received'} ${highlightedMessageId === msg.id ? 'highlighted' : ''}`}
+                    >
+                      {activeItem.type === 'room' && !isMe && msg.sender?.nickname && (
+                        <span style={{ display: 'block', fontSize: '11px', color: '#81a1c1', marginBottom: '3px' }}>
+                          @{msg.sender.nickname}
+                        </span>
+                      )}
+
+                      {msg.replyTo && (
+                        <button
+                          type="button"
+                          onClick={() => handleScrollToMessage(msg.replyTo.id || msg.replyTo)}
+                          style={{
+                            width: '100%',
+                            textAlign: 'left',
+                            fontSize: '12px',
+                            opacity: 0.9,
+                            borderLeft: '3px solid #8696a0',
+                            paddingLeft: '8px',
+                            marginBottom: '8px',
+                            background: 'transparent',
+                            color: 'inherit',
+                            borderTop: 'none',
+                            borderRight: 'none',
+                            borderBottom: 'none',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Reply to:{' '}
+                          {resolvedReply?.sender?.nickname ? `@${resolvedReply.sender.nickname}` : ''}
+                          {' '}
+                          {resolvedReply?.deletedForAll
+                            ? '[deleted]'
+                            : (resolvedReply?.messageText || resolvedReply?.mediaName || '[message]')}
+                        </button>
+                      )}
+
+                      {msg.forwardedFrom && (
+                        <div style={{ fontSize: '12px', opacity: 0.85, marginBottom: '8px' }}>
+                          Forwarded from{' '}
+                          {resolvedForward?.sender?.nickname ? `@${resolvedForward.sender.nickname}` : ''}
+                          {' '}
+                          {resolvedForward?.deletedForAll
+                            ? '[deleted]'
+                            : (resolvedForward?.messageText || resolvedForward?.mediaName || '[message]')}
+                        </div>
+                      )}
+
+                      {msg.mediaUrl && msg.mediaType === 'image' && (
+                        <img
+                          src={msg.mediaUrl}
+                          alt={msg.mediaName || 'image'}
+                          style={{ maxWidth: '100%', borderRadius: '12px', display: 'block', marginBottom: msg.messageText ? '8px' : '0' }}
+                        />
+                      )}
+
+                      <div>
+                        {msg.deletedForAll
+                          ? '[deleted]'
+                          : (msg.messageText || (msg.mediaUrl ? msg.mediaName || 'image' : ''))}
+                      </div>
+
+                      {Object.keys(groupedReactions).length > 0 && (
+                        <div className="emoji-row">
+                          {Object.entries(groupedReactions).map(([emoji, users]) => (
+                            <span key={emoji} className="badge">
+                              {emoji} {users.length}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="message-actions">
+                        <button className="msg-btn" type="button" onClick={() => setReplyToMessage(msg)}>{t('back')}</button>
+                        <button className="msg-btn" type="button" onClick={() => setForwardMessage(msg)}>Forward</button>
+
+                        {EMOJIS.map((emoji) => (
+                          <button
+                            key={emoji}
+                            className="msg-btn"
+                            type="button"
+                            onClick={() => handleReactMessage(msg.id, emoji)}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+
+                        {activeItem.type === 'room' && isAdmin && !roomPinned && (
+                          <button
+                            className="msg-btn"
+                            type="button"
+                            onClick={() => axios.post(`${ROOM_URL}/${activeItem.id}/pin/${msg.id}`, { userId: user.id }).then(() => loadRoomDetails(activeItem.id))}
+                          >
+                            Pin
+                          </button>
+                        )}
+
+                        {activeItem.type === 'room' && isAdmin && roomPinned && (
+                          <button
+                            className="msg-btn"
+                            type="button"
+                            onClick={() => axios.delete(`${ROOM_URL}/${activeItem.id}/pin/${msg.id}`, { data: { userId: user.id } }).then(() => loadRoomDetails(activeItem.id))}
+                          >
+                            Unpin
+                          </button>
+                        )}
+
+                        {canDelete && (
+                          <button className="msg-btn" type="button" onClick={() => handleDeleteMessageForAll(msg.id)}>
+                            Delete for all
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={messagesEndRef} />
+              </div>
+
+              <form onSubmit={handleSendMessage} className="input-area">
+                <input
+                  key={mediaInputKey}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleMediaChange}
+                  style={{ maxWidth: '180px', background: 'transparent', border: 'none', padding: '0', color: '#e9edef' }}
+                />
+                <input
+                  type="text"
+                  placeholder={
+                    activeItem.type === 'room' && roomDetails?.type === 'channel' && !canWriteRoom(roomDetails, user.id)
+                      ? 'Only admin can write here'
+                      : '...'
+                  }
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value)}
+                  disabled={activeItem.type === 'room' && roomDetails?.type === 'channel' && !canWriteRoom(roomDetails, user.id)}
+                />
+                <button
+                  type="submit"
+                  className="primary-btn"
+                  disabled={activeItem.type === 'room' && roomDetails?.type === 'channel' && !canWriteRoom(roomDetails, user.id)}
+                >
+                  {t('send')}
+                </button>
+              </form>
+            </>
+          ) : (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: '#8696a0', fontSize: '16px', padding: '20px', textAlign: 'center' }}>
+              {t('empty_chat')}
+            </div>
+          )}
+        </div>
+      )}
 
       {showCreateModal && (
         <div className="modal-backdrop">
@@ -1810,8 +2671,8 @@ function App() {
       {showRoomInfo && activeItem?.type === 'room' && roomDetails && (
         <div className="modal-backdrop">
           <div className="modal-card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-              <h3 style={{ margin: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', gap: '10px' }}>
+              <h3 style={{ margin: 0, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {roomDetails.type === 'channel' ? '#' : '👥'} {roomDetails.name}
               </h3>
               <span onClick={() => setShowRoomInfo(false)} style={{ cursor: 'pointer', fontSize: '24px', color: '#8696a0' }}>
