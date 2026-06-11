@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { useTranslation } from 'react-i18next';
@@ -30,6 +30,25 @@ const safeJsonParse = (value, fallback) => {
   }
 };
 
+/**
+ * JWT tokenning muddati o'tganligini tekshiradi.
+ * Signaturani tekshirmaydi — faqat exp claimni decode qiladi.
+ * @param {string} token - JWT token
+ * @returns {boolean} - true agar token haqiqiy va muddati o'tmagan bo'lsa
+ */
+const isTokenValid = (token) => {
+  if (!token || typeof token !== 'string') return false;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    if (!payload.exp) return true; // exp maydoni yo'q bo'lsa, muddatsiz deb hisoblaymiz
+    return payload.exp * 1000 > Date.now();
+  } catch {
+    return false;
+  }
+};
+
 const getId = (value) => {
   if (!value) return '';
   if (typeof value === 'string') return value;
@@ -48,6 +67,7 @@ const normalizeUser = (user) => {
     _id: id,
     nickname: user.nickname || '',
     email: user.email || '',
+    avatar: user.avatar || '',
   };
 };
 
@@ -211,6 +231,7 @@ function App() {
   const [newNickname, setNewNickname] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newEmail, setNewEmail] = useState('');
+  const [newAvatar, setNewAvatar] = useState('');
   const [deletePassword, setDeletePassword] = useState('');
 
   const [newRoomName, setNewRoomName] = useState('');
@@ -221,9 +242,11 @@ function App() {
 
   const [chatList, setChatList] = useState([]);
   const [roomList, setRoomList] = useState([]);
+  const [unreadCounts, setUnreadCounts] = useState({});
   const [searchNickname, setSearchNickname] = useState('');
   const [searchRoomUsername, setSearchRoomUsername] = useState('');
   const [joinInviteCode, setJoinInviteCode] = useState('');
+  const [copiedInvite, setCopiedInvite] = useState(false);
 
   const [activeItem, setActiveItem] = useState(null);
   const [messageText, setMessageText] = useState('');
@@ -242,13 +265,16 @@ function App() {
   const [memberNickname, setMemberNickname] = useState('');
   const [memberSearchResult, setMemberSearchResult] = useState(null);
   const [replyToMessage, setReplyToMessage] = useState(null);
-  const [forwardMessage, setForwardMessage] = useState(null);
+  const [showForwardModal, setShowForwardModal] = useState(false);
+  const [messageToForward, setMessageToForward] = useState(null);
+  const [forwardSearchQuery, setForwardSearchQuery] = useState('');
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
   const [selectedMedia, setSelectedMedia] = useState(null);
   const [mediaInputKey, setMediaInputKey] = useState(0);
 
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
   const [mobilePane, setMobilePane] = useState('sidebar');
+  const [chatDeleteNotification, setChatDeleteNotification] = useState(null);
 
   const socketRef = useRef(null);
   const isResizing = useRef(false);
@@ -309,8 +335,20 @@ function App() {
   const fetchChatList = async (userId) => {
     try {
       const res = await axios.get(`${API_URL}/chats/${userId}`);
-      const fetched = Array.isArray(res.data) ? res.data.map(normalizeUser).filter(Boolean) : [];
+      const rawData = Array.isArray(res.data) ? res.data : [];
+      const fetched = rawData.map(normalizeUser).filter(Boolean);
       setChatList((prev) => dedupeById([...fetched, ...prev]));
+      // Initialize unread counts from API response
+      setUnreadCounts((prev) => {
+        const updated = { ...prev };
+        rawData.forEach((item) => {
+          const id = getId(item);
+          if (id && typeof item.unreadCount === 'number') {
+            updated[id] = item.unreadCount;
+          }
+        });
+        return updated;
+      });
     } catch {
       const cached = safeJsonParse(localStorage.getItem(STORAGE.chatList), []);
       setChatList(Array.isArray(cached) ? cached.map(normalizeUser).filter(Boolean) : []);
@@ -320,8 +358,20 @@ function App() {
   const fetchRoomsList = async (userId) => {
     try {
       const res = await axios.get(`${ROOM_URL}/user-rooms/${userId}`);
-      const fetched = Array.isArray(res.data) ? res.data.map(normalizeRoom).filter(Boolean) : [];
+      const rawData = Array.isArray(res.data) ? res.data : [];
+      const fetched = rawData.map(normalizeRoom).filter(Boolean);
       setRoomList((prev) => dedupeById([...fetched, ...prev]));
+      // Initialize unread counts from API response
+      setUnreadCounts((prev) => {
+        const updated = { ...prev };
+        rawData.forEach((item) => {
+          const id = getId(item);
+          if (id && typeof item.unreadCount === 'number') {
+            updated[id] = item.unreadCount;
+          }
+        });
+        return updated;
+      });
     } catch {
       const cached = safeJsonParse(localStorage.getItem(STORAGE.roomList), []);
       setRoomList(Array.isArray(cached) ? cached.map(normalizeRoom).filter(Boolean) : []);
@@ -346,6 +396,11 @@ function App() {
     setShowRoomInfo(false);
     if (isMobile) setMobilePane('chat');
     await loadRoomDetails(room.id);
+
+    // Clean URL after successful invite join
+    if (window.location.pathname.includes('/join/') || window.location.search.includes('invite=')) {
+      window.history.replaceState({}, '', '/');
+    }
   };
 
   const connectSocket = (userId) => {
@@ -381,8 +436,15 @@ function App() {
       if (!msg) return;
 
       if (msg.room) {
-        if (currentActive?.type === 'room' && sameId(msg.room, currentActive.id)) {
+        const roomId = getId(msg.room);
+        if (currentActive?.type === 'room' && sameId(roomId, currentActive.id)) {
           setMessages((prev) => addOrReplaceMessage(prev, msg));
+        } else {
+          // Increment unread count for non-active room
+          const senderId = getId(msg.sender);
+          if (!sameId(senderId, currentUserId)) {
+            setUnreadCounts((prev) => ({ ...prev, [roomId]: (prev[roomId] || 0) + 1 }));
+          }
         }
         return;
       }
@@ -395,6 +457,11 @@ function App() {
         (sameId(senderId, currentActive.id) || sameId(receiverId, currentActive.id))
       ) {
         setMessages((prev) => addOrReplaceMessage(prev, msg));
+      } else {
+        // Increment unread count for non-active DM chat
+        if (!sameId(senderId, currentUserId)) {
+          setUnreadCounts((prev) => ({ ...prev, [senderId]: (prev[senderId] || 0) + 1 }));
+        }
       }
 
       const otherSide = sameId(senderId, currentUserId) ? msg.receiver : msg.sender;
@@ -412,6 +479,28 @@ function App() {
       setMessages((prev) => prev.map((m) => (getId(m) === getId(msg) ? msg : m)));
     });
 
+    socket.on('message_deleted', ({ messageId }) => {
+      if (!messageId) return;
+      setMessages((prev) => prev.filter((m) => getId(m) !== messageId));
+    });
+
+    socket.on('read_confirmation', ({ messageIds, readBy }) => {
+      if (!Array.isArray(messageIds) || !messageIds.length) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          messageIds.includes(getId(m)) ? { ...m, isRead: true } : m
+        )
+      );
+    });
+
+    socket.on('chat_deleted_notification', (data) => {
+      if (!data || !data.deletedById || !data.deletedByNickname) return;
+      setChatDeleteNotification({
+        deletedById: data.deletedById,
+        deletedByNickname: data.deletedByNickname,
+      });
+    });
+
     return socket;
   };
 
@@ -422,6 +511,7 @@ function App() {
     setToken(sessionToken);
     setNewNickname(normalizedUser.nickname || '');
     setNewEmail(normalizedUser.email || '');
+    setNewAvatar(normalizedUser.avatar || '');
     setNewPassword('');
 
     await Promise.all([
@@ -480,11 +570,19 @@ function App() {
     }
 
     if (savedUser && savedToken) {
+      // Req 19.4: Token muddati o'tgan yoki noto'g'ri bo'lsa, sessiyani tiklamaslik
+      if (!isTokenValid(savedToken)) {
+        clearSession();
+        return;
+      }
+
+      // Req 19.2: Token haqiqiy bo'lsa, sessiyani tiklash
       const normalizedUser = normalizeUser(savedUser);
       setUser(normalizedUser);
       setToken(savedToken);
       setNewNickname(normalizedUser.nickname || '');
       setNewEmail(normalizedUser.email || '');
+      setNewAvatar(normalizedUser.avatar || '');
       userRef.current = normalizedUser;
 
       if (savedActiveItem) {
@@ -548,11 +646,27 @@ function App() {
       return;
     }
 
+    // Reset unread count for the newly active chat/room
+    setUnreadCounts((prev) => {
+      const id = activeItem.id;
+      if (prev[id] && prev[id] > 0) {
+        return { ...prev, [id]: 0 };
+      }
+      return prev;
+    });
+
     const loadMessages = async () => {
       try {
         if (activeItem.type === 'user') {
           const res = await axios.get(`${API_URL}/messages/${user.id}/${activeItem.id}`);
           setMessages(Array.isArray(res.data) ? res.data.map(normalizeMessage) : []);
+          // Mark DM messages as read
+          if (socketRef.current) {
+            socketRef.current.emit('mark_as_read', {
+              chatPartnerId: activeItem.id,
+              userId: user.id,
+            });
+          }
         } else if (activeItem.type === 'room') {
           if (socketRef.current) {
             socketRef.current.emit('join_room', activeItem.id);
@@ -560,6 +674,13 @@ function App() {
           const res = await axios.get(`${ROOM_URL}/messages/${activeItem.id}`);
           setMessages(Array.isArray(res.data) ? res.data.map(normalizeMessage) : []);
           await loadRoomDetails(activeItem.id);
+          // Mark room messages as read
+          if (socketRef.current) {
+            socketRef.current.emit('mark_as_read', {
+              roomId: activeItem.id,
+              userId: user.id,
+            });
+          }
         }
       } catch {
         setMessages([]);
@@ -642,12 +763,14 @@ function App() {
         newNickname,
         newPassword,
         newEmail,
+        newAvatar,
       });
 
       const updatedUser = normalizeUser(res.data.user);
       setUser(updatedUser);
       userRef.current = updatedUser;
       localStorage.setItem(STORAGE.user, JSON.stringify(updatedUser));
+      setNewAvatar(updatedUser.avatar || '');
       setNewPassword('');
       alert(res.data.message);
       setShowSettings(false);
@@ -788,13 +911,8 @@ function App() {
         data: { userId: user.id },
       });
 
-      if (res.data.room) {
-        const updatedRoom = normalizeRoom(res.data.room);
-        setRoomList((prev) => prev.map((room) => (room.id === updatedRoom.id ? updatedRoom : room)));
-        setRoomDetails(updatedRoom);
-      } else {
-        removeRoomFromLocalState(activeItem.id);
-      }
+      // Always remove from local state after successful leave
+      removeRoomFromLocalState(activeItem.id);
 
       setActiveItem(null);
       setMessages([]);
@@ -831,7 +949,6 @@ function App() {
     }
 
     if (replyToMessage?.id) payload.replyTo = replyToMessage.id;
-    if (forwardMessage?.id) payload.forwardedFrom = forwardMessage.id;
 
     if (activeItem.type === 'room') {
       payload.room = activeItem.id;
@@ -839,12 +956,18 @@ function App() {
       payload.receiver = activeItem.id;
     }
 
-    socketRef.current.emit('send_message', payload);
-    setMessageText('');
-    setReplyToMessage(null);
-    setForwardMessage(null);
-    setSelectedMedia(null);
-    setMediaInputKey((prev) => prev + 1);
+    socketRef.current.emit('send_message', payload, (ack) => {
+      if (ack && ack.ok === false) {
+        // Req 21.7: Xatolik bo'lganda alert ko'rsatish va matnni saqlash
+        alert(ack.message || 'Xabar jo\'natishda xatolik yuz berdi');
+        return;
+      }
+      // Muvaffaqiyatli jo'natilganda tozalash
+      setMessageText('');
+      setReplyToMessage(null);
+      setSelectedMedia(null);
+      setMediaInputKey((prev) => prev + 1);
+    });
   };
 
   const handleDeleteChat = async () => {
@@ -852,13 +975,34 @@ function App() {
 
     try {
       await axios.delete(`${API_URL}/chats/${user.id}/${activeItem.id}`);
+      // Notify the other user about chat deletion
+      if (socketRef.current) {
+        socketRef.current.emit('notify_chat_deleted', { deletedBy: user.id, chatPartnerId: activeItem.id });
+      }
       setChatList((prev) => prev.filter((u) => u.id !== activeItem.id));
       setActiveItem(null);
       setMessages([]);
       localStorage.removeItem(STORAGE.activeItem);
       if (isMobile) setMobilePane('sidebar');
     } catch (err) {
-      alert(err.response?.data?.message || 'Chatni o‘chirishda xatolik');
+      alert(err.response?.data?.message || 'Xatolik');
+    }
+  };
+
+  const handleAcceptDeleteChat = async () => {
+    if (!user || !chatDeleteNotification) return;
+    try {
+      await axios.delete(`${API_URL}/chats/${user.id}/${chatDeleteNotification.deletedById}`);
+      setChatList((prev) => prev.filter((u) => u.id !== chatDeleteNotification.deletedById));
+      if (activeItem && sameId(activeItem.id, chatDeleteNotification.deletedById)) {
+        setActiveItem(null);
+        setMessages([]);
+        localStorage.removeItem(STORAGE.activeItem);
+        if (isMobile) setMobilePane('sidebar');
+      }
+      setChatDeleteNotification(null);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Xatolik');
     }
   };
 
@@ -1006,9 +1150,11 @@ function App() {
     const text = `${window.location.origin}/join/${roomDetails.inviteCode}`;
     try {
       await navigator.clipboard.writeText(text);
-      alert('Invite link copied');
+      setCopiedInvite(true);
+      setTimeout(() => setCopiedInvite(false), 2000);
     } catch {
-      alert(text);
+      // Fallback: prompt bilan ko'rsatish
+      window.prompt('Invite link:', text);
     }
   };
 
@@ -1052,6 +1198,7 @@ function App() {
     setToken('');
     setChatList([]);
     setRoomList([]);
+    setUnreadCounts({});
     setActiveItem(null);
     setMessages([]);
     setMessageText('');
@@ -1065,6 +1212,7 @@ function App() {
     setNewNickname('');
     setNewPassword('');
     setNewEmail('');
+    setNewAvatar('');
     setDeletePassword('');
     setShowDeleteAccountModal(false);
     setShowRoomInfo(false);
@@ -1076,7 +1224,9 @@ function App() {
     setMemberNickname('');
     setMemberSearchResult(null);
     setReplyToMessage(null);
-    setForwardMessage(null);
+    setShowForwardModal(false);
+    setMessageToForward(null);
+    setForwardSearchQuery('');
     setJoinInviteCode('');
     setSelectedMedia(null);
     setMediaInputKey((prev) => prev + 1);
@@ -1092,6 +1242,14 @@ function App() {
       return;
     }
 
+    // Req 21.2: Rasm hajmi 10 MB dan oshmasligi kerak
+    const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+    if (file.size > MAX_SIZE) {
+      alert('Rasm hajmi 10 MB dan oshmasligi kerak');
+      setMediaInputKey((prev) => prev + 1);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
       setSelectedMedia({
@@ -1103,10 +1261,55 @@ function App() {
     reader.readAsDataURL(file);
   };
 
+  const handleAvatarChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      alert(t('avatar_too_large'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setNewAvatar(String(reader.result || ''));
+    reader.readAsDataURL(file);
+  };
+
+  const handleForwardToDestination = (destination) => {
+    if (!messageToForward || !user?.id || !socketRef.current) return;
+
+    const payload = {
+      sender: user.id,
+      messageText: messageToForward.messageText || '',
+      forwardedFrom: messageToForward.id,
+    };
+
+    if (messageToForward.mediaUrl) {
+      payload.mediaUrl = messageToForward.mediaUrl;
+      payload.mediaType = messageToForward.mediaType || '';
+      payload.mediaName = messageToForward.mediaName || '';
+    }
+
+    if (destination.type === 'room') {
+      payload.room = destination.id;
+    } else {
+      payload.receiver = destination.id;
+    }
+
+    socketRef.current.emit('send_message', payload, (ack) => {
+      if (ack && ack.ok === false) {
+        alert(ack.message || 'Xabar yo\'naltirishda xatolik yuz berdi');
+        return;
+      }
+      setShowForwardModal(false);
+      setMessageToForward(null);
+      setForwardSearchQuery('');
+      alert(t('forward_success'));
+    });
+  };
+
   const currentRole = roomDetails ? getRoomRole(roomDetails, user?.id) : null;
   const isOwner = currentRole === 'owner';
   const isAdmin = currentRole === 'admin' || currentRole === 'owner';
-  const canAddPeople = !!currentRole;
+  const canAddPeople = isAdmin;
   const canSendInRoom = activeItem?.type === 'room'
     ? (roomDetails?.type === 'group' ? !!currentRole : isAdmin)
     : true;
@@ -1300,6 +1503,12 @@ function App() {
 
   .lang-chip.active {
     color:var(--accent);
+  }
+
+  .ghost-btn.active-lang {
+    background:var(--accent);
+    color:#fff;
+    font-weight:700;
   }
 
   @media (max-width:600px) {
@@ -2040,6 +2249,24 @@ function App() {
   {showSettings ? (
     <div className="sidebar-card">
       <form onSubmit={handleUpdateProfile}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '16px' }}>
+          {newAvatar ? (
+            <img src={newAvatar} alt="avatar" style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover' }} />
+          ) : (
+            <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#2a3942', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>
+              {user.nickname?.charAt(0)?.toUpperCase() || '?'}
+            </div>
+          )}
+          <div>
+            <input type="file" accept="image/*" onChange={handleAvatarChange} style={{ maxWidth: '160px' }} />
+            {newAvatar && (
+              <button type="button" className="ghost-btn" style={{ marginTop: '6px', fontSize: '12px' }} onClick={() => setNewAvatar('')}>
+                {t('remove_avatar')}
+              </button>
+            )}
+          </div>
+        </div>
+
         <label className="sidebar-label">{t('username_label')}</label>
         <input
           className="sidebar-input"
@@ -2069,9 +2296,9 @@ function App() {
   
         <div className="sidebar-section-title">{t('select_lang')}</div>
         <div className="stack">
-          <button type="button" className="ghost-btn" onClick={() => changeLang('uz')}>UZ</button>
-          <button type="button" className="ghost-btn" onClick={() => changeLang('ru')}>RU</button>
-          <button type="button" className="ghost-btn" onClick={() => changeLang('en')}>EN</button>
+          <button type="button" className={`ghost-btn${i18n.language === 'uz' ? ' active-lang' : ''}`} onClick={() => changeLang('uz')}>🇺🇿 UZ</button>
+          <button type="button" className={`ghost-btn${i18n.language === 'ru' ? ' active-lang' : ''}`} onClick={() => changeLang('ru')}>🇷🇺 RU</button>
+          <button type="button" className={`ghost-btn${i18n.language === 'en' ? ' active-lang' : ''}`} onClick={() => changeLang('en')}>🇬🇧 EN</button>
         </div>
   
         <button type="submit" className="sidebar-btn" style={{ marginTop: '14px' }}>
@@ -2224,6 +2451,7 @@ function App() {
     {roomList.map((room) => {
       const memberCount = Array.isArray(room.members) ? room.members.length : 0;
       const active = activeItem?.type === 'room' && sameId(activeItem.id, room.id);
+      const unread = unreadCounts[room.id] || 0;
   
       return (
         <div
@@ -2252,10 +2480,59 @@ function App() {
           <span style={{ color: '#81a1c1' }}>
             {room.type === 'channel' ? '#' : '👥'}
           </span>
-          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
             <span>{room.name}</span>
             <span className="small">{memberCount} {t('members')}</span>
           </span>
+          {unread > 0 && (
+            <span className="unread-badge">{unread > 99 ? '99+' : unread}</span>
+          )}
+        </div>
+      );
+    })}
+
+    {chatList.length > 0 && (
+      <h4 className="section-title">{t('chats') || 'Chatlar'}</h4>
+    )}
+
+    {chatList.map((chatUser) => {
+      const active = activeItem?.type === 'user' && sameId(activeItem.id, chatUser.id);
+      const unread = unreadCounts[chatUser.id] || 0;
+
+      return (
+        <div
+          key={chatUser.id}
+          onClick={() => {
+            setShowSettings(false);
+            setShowCreateModal(false);
+            setActiveItem({
+              type: 'user',
+              id: chatUser.id,
+              label: chatUser.nickname,
+            });
+            setShowRoomInfo(false);
+            if (isMobile) setMobilePane('chat');
+          }}
+          className={`chip ${active ? 'active' : ''}`}
+          style={{
+            background: active ? '#1f2c35' : 'transparent',
+            border: active ? '1px solid #00a884' : '1px solid transparent',
+            marginBottom: '8px'
+          }}
+        >
+          {chatUser.avatar ? (
+            <img src={chatUser.avatar} alt="" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+          ) : (
+            <span style={{ width: 36, height: 36, borderRadius: '50%', background: '#2a3942', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '14px' }}>
+              {chatUser.nickname?.charAt(0)?.toUpperCase() || '?'}
+            </span>
+          )}
+          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+            <span>@{chatUser.nickname}</span>
+          </span>
+          {unread > 0 && (
+            <span className="unread-badge">{unread > 99 ? '99+' : unread}</span>
+          )}
         </div>
       );
     })}
@@ -2282,6 +2559,16 @@ function App() {
                       ←
                     </button>
                   )}
+                  {activeItem.type === 'user' && (() => {
+                    const partner = chatList.find((u) => sameId(u.id, activeItem.id));
+                    return partner?.avatar ? (
+                      <img src={partner.avatar} alt="" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+                    ) : (
+                      <span style={{ width: 32, height: 32, borderRadius: '50%', background: '#2a3942', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '13px' }}>
+                        {activeItem.label?.charAt(0)?.toUpperCase() || '?'}
+                      </span>
+                    );
+                  })()}
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {activeHeaderText}
                   </span>
@@ -2316,35 +2603,33 @@ function App() {
                 </div>
               </div>
 
+              {chatDeleteNotification && activeItem?.type === 'user' && sameId(activeItem.id, chatDeleteNotification.deletedById) && (
+                <div style={{ padding: '12px 16px', background: '#1f2c35', borderBottom: '1px solid #2a3942', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                  <span>{t('chat_deleted_by', { name: chatDeleteNotification.deletedByNickname })}</span>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="danger-btn" onClick={handleAcceptDeleteChat}>{t('yes_delete')}</button>
+                    <button className="ghost-btn" onClick={() => setChatDeleteNotification(null)}>{t('no_keep')}</button>
+                  </div>
+                </div>
+              )}
+
               {replyToMessage && (
                 <div className="reply-box">
-                  <div>
-                    <div className="small">Replying to</div>
-                    <div style={{ fontWeight: 700 }}>
+                  <div style={{ overflow: 'hidden', flex: 1 }}>
+                    <div className="small" style={{ color: 'var(--accent)', fontWeight: 600 }}>{t('replying_to')}</div>
+                    <div style={{ fontWeight: 700, fontSize: '13px' }}>
                       {replyToMessage.sender?.nickname ? `@${replyToMessage.sender.nickname}` : '@unknown'}
                     </div>
-                    <div>{replyToMessage.deletedForAll ? '[deleted]' : replyToMessage.messageText || replyToMessage.mediaName || ''}</div>
+                    <div style={{ fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', opacity: 0.85 }}>
+                      {replyToMessage.deletedForAll ? '[deleted]' : (replyToMessage.messageText || replyToMessage.mediaName || '').slice(0, 80) + ((replyToMessage.messageText || '').length > 80 ? '…' : '')}
+                    </div>
                   </div>
-                  <button className="ghost-btn" type="button" onClick={() => setReplyToMessage(null)}>
-                    {t('cancel')}
+                  <button className="ghost-btn" type="button" onClick={() => setReplyToMessage(null)} style={{ fontSize: '18px', padding: '4px 10px', lineHeight: 1 }} aria-label={t('cancel')}>
+                    ✕
                   </button>
                 </div>
               )}
 
-              {forwardMessage && (
-                <div className="reply-box">
-                  <div>
-                    <div className="small">Forward draft</div>
-                    <div style={{ fontWeight: 700 }}>
-                      {forwardMessage.sender?.nickname ? `@${forwardMessage.sender.nickname}` : '@unknown'}
-                    </div>
-                    <div>{forwardMessage.deletedForAll ? '[deleted]' : forwardMessage.messageText || forwardMessage.mediaName || ''}</div>
-                  </div>
-                  <button className="ghost-btn" type="button" onClick={() => setForwardMessage(null)}>
-                    {t('cancel')}
-                  </button>
-                </div>
-              )}
 
               {selectedMedia && (
                 <div className="reply-box" style={{ alignItems: 'flex-start' }}>
@@ -2369,7 +2654,7 @@ function App() {
               <div className="messages-container">
                 {pinnedMessages.length > 0 && (
                   <div style={{ padding: '10px 12px', border: '1px solid #2a3942', borderRadius: '12px', marginBottom: '12px', background: '#111b21' }}>
-                    <div className="small" style={{ marginBottom: '6px' }}>Pinned messages</div>
+                    <div className="small" style={{ marginBottom: '6px' }}>{t('pinned_messages')}</div>
                     {pinnedMessages.map((p) => (
                       <div key={p.id} style={{ fontSize: '13px', marginBottom: '4px' }}>
                         • {p.deletedForAll ? '[deleted]' : p.messageText || p.mediaName || 'media'}
@@ -2440,7 +2725,7 @@ function App() {
 
                       {msg.forwardedFrom && (
                         <div style={{ fontSize: '12px', opacity: 0.85, marginBottom: '8px' }}>
-                          Forwarded from{' '}
+                          {t('forwarded_from')}{' '}
                           {resolvedForward?.sender?.nickname ? `@${resolvedForward.sender.nickname}` : ''}
                           {' '}
                           {resolvedForward?.deletedForAll
@@ -2474,8 +2759,8 @@ function App() {
                       )}
 
                       <div className="message-actions">
-                        <button className="msg-btn" type="button" onClick={() => setReplyToMessage(msg)}>{t('back')}</button>
-                        <button className="msg-btn" type="button" onClick={() => setForwardMessage(msg)}>Forward</button>
+                        <button className="msg-btn" type="button" onClick={() => setReplyToMessage(msg)}>{t('reply')}</button>
+                        <button className="msg-btn" type="button" onClick={() => { setMessageToForward(msg); setShowForwardModal(true); setForwardSearchQuery(''); }}>{t('forward')}</button>
 
                         {EMOJIS.map((emoji) => (
                           <button
@@ -2494,7 +2779,7 @@ function App() {
                             type="button"
                             onClick={() => axios.post(`${ROOM_URL}/${activeItem.id}/pin/${msg.id}`, { userId: user.id }).then(() => loadRoomDetails(activeItem.id))}
                           >
-                            Pin
+                            {t('pin_message')}
                           </button>
                         )}
 
@@ -2504,13 +2789,13 @@ function App() {
                             type="button"
                             onClick={() => axios.delete(`${ROOM_URL}/${activeItem.id}/pin/${msg.id}`, { data: { userId: user.id } }).then(() => loadRoomDetails(activeItem.id))}
                           >
-                            Unpin
+                            {t('unpin_message')}
                           </button>
                         )}
 
                         {canDelete && (
                           <button className="msg-btn" type="button" onClick={() => handleDeleteMessageForAll(msg.id)}>
-                            Delete for all
+                            {t('delete_for_all')}
                           </button>
                         )}
                       </div>
@@ -2542,7 +2827,10 @@ function App() {
                 <button
                   type="submit"
                   className="primary-btn"
-                  disabled={activeItem.type === 'room' && roomDetails?.type === 'channel' && !canWriteRoom(roomDetails, user.id)}
+                  disabled={
+                    (activeItem.type === 'room' && roomDetails?.type === 'channel' && !canWriteRoom(roomDetails, user.id)) ||
+                    (!messageText.trim() && !selectedMedia)
+                  }
                 >
                   {t('send')}
                 </button>
@@ -2553,6 +2841,99 @@ function App() {
               {t('empty_chat')}
             </div>
           )}
+        </div>
+      )}
+
+      {showForwardModal && messageToForward && (
+        <div className="modal-backdrop">
+          <div className="modal-card" style={{ width: 'min(400px, 100%)', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <h3 style={{ margin: 0 }}>{t('forward_to')}</h3>
+              <span
+                onClick={() => { setShowForwardModal(false); setMessageToForward(null); setForwardSearchQuery(''); }}
+                style={{ cursor: 'pointer', fontSize: '24px', color: '#8696a0' }}
+              >
+                &times;
+              </span>
+            </div>
+
+            <div style={{ padding: '8px 0', marginBottom: '8px', background: '#17232c', borderRadius: '10px', padding: '10px' }}>
+              <div className="small" style={{ marginBottom: '4px', color: 'var(--accent)' }}>{t('forward_draft')}:</div>
+              <div style={{ fontSize: '13px', opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {messageToForward.deletedForAll ? '[deleted]' : (messageToForward.messageText || messageToForward.mediaName || '').slice(0, 100)}
+              </div>
+            </div>
+
+            <input
+              type="text"
+              placeholder={t('search') + '...'}
+              value={forwardSearchQuery}
+              onChange={(e) => setForwardSearchQuery(e.target.value)}
+              style={{ marginBottom: '12px' }}
+            />
+
+            <div style={{ flex: 1, overflowY: 'auto', maxHeight: '400px' }}>
+              {chatList.length > 0 && (
+                <>
+                  <div className="section-title" style={{ marginTop: 0 }}>{t('direct_messages')}</div>
+                  {chatList
+                    .filter((u) => !sameId(u.id, user.id) && (!forwardSearchQuery || normalizeText(u.nickname).includes(normalizeText(forwardSearchQuery))))
+                    .map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        className="room-item"
+                        onClick={() => handleForwardToDestination({ type: 'user', id: u.id, label: u.nickname })}
+                      >
+                        <div className="room-icon">@</div>
+                        <div className="room-text">
+                          <div className="room-name">{u.nickname}</div>
+                          <div className="room-meta">DM</div>
+                        </div>
+                      </button>
+                    ))}
+                </>
+              )}
+
+              {roomList.length > 0 && (
+                <>
+                  <div className="section-title">{t('channels_groups')}</div>
+                  {roomList
+                    .filter((r) => !forwardSearchQuery || normalizeText(r.name).includes(normalizeText(forwardSearchQuery)))
+                    .map((r) => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        className="room-item"
+                        onClick={() => handleForwardToDestination({ type: 'room', id: r.id, label: r.name, roomType: r.type })}
+                      >
+                        <div className="room-icon">{r.type === 'channel' ? '#' : '👥'}</div>
+                        <div className="room-text">
+                          <div className="room-name">{r.name}</div>
+                          <div className="room-meta">{r.type === 'channel' ? t('channel') : t('group')}</div>
+                        </div>
+                      </button>
+                    ))}
+                </>
+              )}
+
+              {chatList.filter((u) => !sameId(u.id, user.id) && (!forwardSearchQuery || normalizeText(u.nickname).includes(normalizeText(forwardSearchQuery)))).length === 0 &&
+               roomList.filter((r) => !forwardSearchQuery || normalizeText(r.name).includes(normalizeText(forwardSearchQuery))).length === 0 && (
+                <div style={{ textAlign: 'center', color: '#8696a0', padding: '20px' }}>
+                  {t('no_results')}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              className="ghost-btn"
+              style={{ width: '100%', marginTop: '12px' }}
+              onClick={() => { setShowForwardModal(false); setMessageToForward(null); setForwardSearchQuery(''); }}
+            >
+              {t('cancel')}
+            </button>
+          </div>
         </div>
       )}
 
@@ -2691,7 +3072,7 @@ function App() {
             <div className="small" style={{ marginBottom: '12px' }}>
               Invite code: {roomDetails.inviteCode || '-'}
               <button type="button" className="ghost-btn" style={{ marginLeft: '10px' }} onClick={handleCopyInviteLink}>
-                {t('copy_link')}
+                {copiedInvite ? '✓ Copied!' : t('copy_link')}
               </button>
             </div>
 
@@ -2707,7 +3088,7 @@ function App() {
               )}
 
               <button type="button" className="ghost-btn" onClick={handleCopyInviteLink}>
-                {t('copy_link')}
+                {copiedInvite ? '✓ Copied!' : t('copy_link')}
               </button>
             </div>
 
@@ -2752,6 +3133,7 @@ function App() {
               )}
             </div>
 
+            {canAddPeople && (
             <div style={{ marginBottom: '18px' }}>
               <h4 className="section-title" style={{ marginTop: 0 }}>{t('add_member')}</h4>
               <input
@@ -2759,13 +3141,12 @@ function App() {
                 placeholder={t('search')}
                 value={memberNickname}
                 onChange={(e) => setMemberNickname(e.target.value)}
-                disabled={!canAddPeople}
               />
-              <button type="button" className="primary-btn" style={{ width: '100%' }} onClick={handleFindMember} disabled={!canAddPeople}>
+              <button type="button" className="primary-btn" style={{ width: '100%' }} onClick={handleFindMember}>
                 {t('search')}
               </button>
 
-              {memberSearchResult && canAddPeople && (
+              {memberSearchResult && (
                 <div style={{ marginTop: '12px', padding: '12px', borderRadius: '12px', background: '#2a3942' }}>
                   <div style={{ marginBottom: '8px' }}>
                     @{memberSearchResult.nickname}
@@ -2776,6 +3157,7 @@ function App() {
                 </div>
               )}
             </div>
+            )}
 
             <div>
               <h4 className="section-title" style={{ marginTop: 0 }}>{t('members')}</h4>
@@ -2805,7 +3187,7 @@ function App() {
                         {isCurrentUser && <span className="badge">you</span>}
                       </div>
 
-                      {isOwner && !isCreator && (
+                      {isOwner && !isCreator && !isCurrentUser && (
                         <div className="stack">
                           {isMemberAdmin ? (
                             <button type="button" className="ghost-btn" onClick={() => handleRemoveAdmin(memberId)}>
@@ -2827,7 +3209,7 @@ function App() {
                         </div>
                       )}
 
-                      {!isOwner && isAdmin && !isCreator && (
+                      {!isOwner && isAdmin && !isCreator && !isMemberAdmin && !isCurrentUser && (
                         <button
                           type="button"
                           className="danger-btn"
